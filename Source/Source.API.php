@@ -389,8 +389,8 @@ function Source_Process_Changesets( $p_changesets, $p_repo=null ) {
 
 		# Update the resolution, fixed-in version, and/or add a bugnote
 		$t_update = false;
-        # Resolve the issue
-        $t_resolved = false;
+		# Resolve the issue
+		$t_resolved = false;
 
 		if ( Source_PVM() ) {
 			if ( $t_bugfix_status_pvm > 0 && $t_pvm_version_id > 0 ) {
