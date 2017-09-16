@@ -389,6 +389,8 @@ function Source_Process_Changesets( $p_changesets, $p_repo=null ) {
 
 		# Update the resolution, fixed-in version, and/or add a bugnote
 		$t_update = false;
+        # Resolve the issue
+        $t_resolved = false;
 
 		if ( Source_PVM() ) {
 			if ( $t_bugfix_status_pvm > 0 && $t_pvm_version_id > 0 ) {
@@ -404,11 +406,16 @@ function Source_Process_Changesets( $p_changesets, $p_repo=null ) {
 			# identified; otherwise, it will remain open.
 
 			if ( $t_bugfix_status > 0 && $t_bug->status != $t_bugfix_status ) {
+				# If bugfixed status is configured & bug doesn't already have that
+				# status, update it
+
 				$t_bug->status = $t_bugfix_status;
 				$t_update = true;
 			} else if ( $t_enable_resolving && $t_bugfix_status == -1 && $t_bug->status < $t_resolved_threshold ) {
-				$t_bug->status = $t_resolved_threshold;
-				$t_update = true;
+				# Resolving is enabled, bugfixed status is disabled & bug isn't
+				# already at the resolved threshold
+
+				$t_resolved = true;
 			}
 
 			if( $t_bug->resolution < $t_fixed_threshold || $t_bug->resolution >= $t_notfixed_threshold
@@ -443,6 +450,12 @@ function Source_Process_Changesets( $p_changesets, $p_repo=null ) {
 
 		} else if ( $t_message ) {
 			bugnote_add( $t_bug_id, $t_message, '0:00', $t_private );
+		}
+
+		if ( $t_resolved ) {
+			# If the issue is to be resolved, do this last, after all the other
+			# fields have been set
+			bug_resolve( $t_bug_id, $t_resolution );
 		}
 	}
 
