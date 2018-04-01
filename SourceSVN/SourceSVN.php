@@ -18,6 +18,7 @@ class SourceSVNPlugin extends MantisSourcePlugin {
 	const ERROR_PATH_INVALID = 'path_invalid';
 	const ERROR_SVN_RUN = 'svn_run';
 	const ERROR_SVN_CMD = 'svn_cmd';
+	const ERROR_INVALID_XML = 'invalid_xml';
 
 	public function register() {
 		$this->name = plugin_lang_get( 'title' );
@@ -48,6 +49,7 @@ class SourceSVNPlugin extends MantisSourcePlugin {
 			self::ERROR_PATH_INVALID,
 			self::ERROR_SVN_RUN,
 			self::ERROR_SVN_CMD,
+			self::ERROR_INVALID_XML,
 		);
 
 		foreach( $t_errors_list as $t_error ) {
@@ -281,7 +283,13 @@ class SourceSVNPlugin extends MantisSourcePlugin {
 		# finding max revision
 		$t_svninfo_xml = $this->svn_run( "info $t_url --xml", $p_repo );
 		# create parser
-		$t_svninfo_parsed_xml = new SimpleXMLElement($t_svninfo_xml);
+
+		try {
+			$t_svninfo_parsed_xml = new SimpleXMLElement($t_svninfo_xml);
+		} catch ( Exception $e ) {
+			error_parameters( trim( $t_svninfo_xml ) );
+			plugin_error( self::ERROR_INVALID_XML ); 
+		}
 
 		$t_max_rev = (integer) $t_svninfo_parsed_xml->entry->commit['revision'];
 
@@ -328,8 +336,8 @@ class SourceSVNPlugin extends MantisSourcePlugin {
 	 *            handling of pipe data, lower values will increase overhead
 	 * @return boolean true in the case that an error occured during handling, false otherwise
 	 */
-	private function read_proc_streams( &$p_proc, &$p_pipes, &$p_output,
-	                                    $p_timeout = 30000000, $p_sleep = 100000 )
+	private static function read_proc_streams( &$p_proc, &$p_pipes, &$p_output,
+	                                           $p_timeout = 30000000, $p_sleep = 100000 )
 	{
 		$p_output[0] = "";
 		$p_output[1] = "";
@@ -337,6 +345,8 @@ class SourceSVNPlugin extends MantisSourcePlugin {
 		$t_err = false;
 		$t_first = true;
 		$t_sleep = $p_sleep;
+		$t_proc_done = false;
+		$t_finished = false;
 
 		do {
 			if( !$t_first ) {
@@ -386,9 +396,14 @@ class SourceSVNPlugin extends MantisSourcePlugin {
 				$t_sleep = min( $p_sleep, $t_sleep * 1.2 );
 			}
 
-			$t_etat=proc_get_status( $p_proc );
+			if( !$t_proc_done ) {
+				$t_etat=proc_get_status( $p_proc );
+				$t_proc_done = $t_etat['running'] != TRUE;
+			} else {
+				$t_finished = true;
+			}
 
-		} while( !$t_err && ( $t_etat['running'] == TRUE ));
+		} while( !$t_err && !$t_finished );
 
 		return $t_err;
 	}
@@ -418,7 +433,12 @@ class SourceSVNPlugin extends MantisSourcePlugin {
 			plugin_error( self::ERROR_SVN_RUN );
 		}
 
-		read_proc_streams( $t_svn_proc, $t_pipes, array( &$t_svn_out, &$t_stderr) );
+		$t_svn_out = "";
+		$t_stderr = "";
+
+		$t_out_array = array( &$t_svn_out, &$t_stderr);
+
+		SourceSVNPlugin::read_proc_streams( $t_svn_proc, $t_pipes, $t_out_array );
 
 		# Get output of the process & clean up
 		fclose( $t_pipes[2] );
@@ -427,7 +447,7 @@ class SourceSVNPlugin extends MantisSourcePlugin {
 		proc_close( $t_svn_proc );
 
 		# Error handling
-		if( $t_stderr ) {
+		if( !empty( $t_stderr )) {
 			error_parameters( trim( $t_stderr ) );
 			plugin_error( self::ERROR_SVN_CMD );
 		}
