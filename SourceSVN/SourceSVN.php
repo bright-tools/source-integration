@@ -309,6 +309,91 @@ class SourceSVNPlugin extends MantisSourcePlugin {
 	}
 
 	/**
+	 * Read the stdout and stderr streams assocaited with a proc_open()'d process
+	 * 
+	 * This function is intended to deal with the pipes in a manner which works robustly
+	 * on all platforms, including Windows.  This means avoiding the use of 
+	 * stream_get_contents() or any other mechanism which expects the pipes to be 
+	 * non-blocking.
+	 * 
+	 * On Windows they will always be blocking, even after applying stream_set_blocking()
+	 * See https://bugs.php.net/bug.php?id=47918
+	 * 
+	 * @param resource Resource returned from proc_open()
+	 * @param resource[] Pipes associate with the process
+	 * @param string[] Array to receive two strings associated with stdout and stderr respectively
+	 * @param int Timeout.  If data has not been received for the duration specified here,
+	 *            terminate the process & give up
+	 * @param int Sleep time between checking the pipes.  Higher values will result in slower
+	 *            handling of pipe data, lower values will increase overhead
+	 * @return boolean true in the case that an error occured during handling, false otherwise
+	 */
+	private function read_proc_streams( &$p_proc, &$p_pipes, &$p_output,
+	                                    $p_timeout = 30000000, $p_sleep = 100000 )
+	{
+		$p_output[0] = "";
+		$p_output[1] = "";
+		$t_no_data = 0;
+		$t_err = false;
+		$t_first = true;
+		$t_sleep = $p_sleep;
+
+		do {
+			if( !$t_first ) {
+				usleep( $t_sleep );
+			} else {
+				$t_first = false;
+			}
+
+			$t_data_received = false;
+
+			for( $t_pipe = 1; $t_pipe < 3; $t_pipe++ ) {
+
+				# Check pipe hasn't disappeared from under us
+				if( is_resource( $p_pipes[$t_pipe] ) ) {
+
+					$t_stat_arr=fstat( $p_pipes[$t_pipe] );
+
+					# Data to be read?
+					if( $t_stat_arr['size'] > 0 ) {
+
+						$line = fread( $p_pipes[$t_pipe], $t_stat_arr['size'] );
+						$p_output[$t_pipe-1] .= $line;
+						$t_data_received = TRUE;
+					}
+				}
+			}
+
+			if( $t_data_received ) {
+				$t_no_data = 0;
+				# Sleep only a short time - allow the buffer to be refilled
+				$t_sleep = $p_sleep / 10;
+
+			} else {
+
+				# Amount of time that we've not received data
+				$t_no_data = $t_no_data + intval( $t_sleep );
+
+				# Timeout reached?
+				if( $t_no_data >= $p_timeout ) {
+
+					# Terminate the process & error
+					proc_terminate( $p_proc, 9 );
+					$t_err = true;
+				}
+				# As data is not received, gradually step up the sleep time until
+				#  we reach the threshold
+				$t_sleep = min( $p_sleep, $t_sleep * 1.2 );
+			}
+
+			$t_etat=proc_get_status( $p_proc );
+
+		} while( !$t_err && ( $t_etat['running'] == TRUE ));
+
+		return $t_err;
+	}
+
+	/**
 	 * Execute SVN command, catching & raising errors in both
 	 *   execution and output
 	 * @param  string     $p_cmd  Command and any parameters
@@ -333,10 +418,10 @@ class SourceSVNPlugin extends MantisSourcePlugin {
 			plugin_error( self::ERROR_SVN_RUN );
 		}
 
+		read_proc_streams( $t_svn_proc, $t_pipes, array( &$t_svn_out, &$t_stderr) );
+
 		# Get output of the process & clean up
-		$t_stderr = stream_get_contents( $t_pipes[2] );
 		fclose( $t_pipes[2] );
-		$t_svn_out = stream_get_contents( $t_pipes[1] );
 		fclose( $t_pipes[1] );
 		fclose( $t_pipes[0] );
 		proc_close( $t_svn_proc );
