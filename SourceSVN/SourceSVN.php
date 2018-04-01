@@ -282,9 +282,9 @@ class SourceSVNPlugin extends MantisSourcePlugin {
 
 		# finding max revision
 		$t_svninfo_xml = $this->svn_run( "info $t_url --xml", $p_repo );
-		# create parser
 
 		try {
+			# create parser
 			$t_svninfo_parsed_xml = new SimpleXMLElement($t_svninfo_xml);
 		} catch ( Exception $e ) {
 			error_parameters( trim( $t_svninfo_xml ) );
@@ -397,8 +397,11 @@ class SourceSVNPlugin extends MantisSourcePlugin {
 			}
 
 			if( !$t_proc_done ) {
-				$t_etat=proc_get_status( $p_proc );
-				$t_proc_done = $t_etat['running'] != TRUE;
+				# Check to see if the process is still running.  If not, we'll
+				#  go round just once more in order to ensure that we've
+				#  processed any buffered data
+				$t_proc_status=proc_get_status( $p_proc );
+				$t_proc_done = $t_proc_status['running'] != TRUE;
 			} else {
 				$t_finished = true;
 			}
